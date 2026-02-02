@@ -2,74 +2,72 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import os
+import sys
 
-# Configuración de Telegram
+# 1. Configuración
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 BASE_URL = "https://www.cnmv.es/portal/"
+ARCHIVO_DB = 'registro_entidades.csv'
 
 def enviar_telegram(mensaje):
-    if TOKEN and CHAT_ID:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        payload = {
-            'chat_id': CHAT_ID,
-            'text': mensaje,
-            'parse_mode': 'HTML'
-        }
-        # ESTO ES LO NUEVO: Guardamos la respuesta para ver qué dice
+    if not TOKEN or not CHAT_ID:
+        print("❌ ERROR: Faltan TOKEN o CHAT_ID en los Secrets de GitHub.")
+        return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {'chat_id': CHAT_ID, 'text': mensaje, 'parse_mode': 'HTML'}
+    try:
         r = requests.post(url, data=payload)
-        print(f"Resultado de Telegram: {r.status_code} - {r.text}")
-    else:
-        print("❌ Error: No se encontraron el TOKEN o el CHAT_ID en los Secrets.")
+        print(f"📡 Respuesta Telegram: {r.status_code} - {r.text}")
+    except Exception as e:
+        print(f"❌ Error de conexión con Telegram: {e}")
+
 def obtener_datos():
-    nuevas_entidades = []
+    entidades = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     urls = {
-        "SGIIC (Fondos)": "https://www.cnmv.es/portal/consultas/listadoentidad?id=2&tipoent=0&lang=es",
-        "SGEIC (Capital Riesgo)": "https://www.cnmv.es/portal/consultas/listadoentidad?id=4&tipoent=0&lang=es"
+        "SGIIC": "https://www.cnmv.es/portal/consultas/listadoentidad?id=2&tipoent=0&lang=es",
+        "SGEIC": "https://www.cnmv.es/portal/consultas/listadoentidad?id=4&tipoent=0&lang=es"
     }
-    
     for tipo, url in urls.items():
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Buscamos los enlaces que contienen la ficha de la entidad
-        for link in soup.find_all('a', href=True):
-            if "consultas/instancia" in link['href']:
-                nombre = link.get_text(strip=True)
-                # Construimos la URL completa
-                enlace_completo = BASE_URL + link['href']
-                if nombre:
-                    nuevas_entidades.append({
-                        'Nombre': nombre, 
-                        'Tipo': tipo, 
-                        'Enlace': enlace_completo
-                    })
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            for link in soup.find_all('a', href=True):
+                if "consultas/instancia" in link['href']:
+                    nombre = link.get_text(strip=True)
+                    if nombre:
+                        entidades.append({'Nombre': nombre, 'Tipo': tipo, 'Enlace': BASE_URL + link['href']})
+        except:
+            print(f"⚠️ Error leyendo {tipo}")
     
-    return pd.DataFrame(nuevas_entidades)
+    # IMPORTANTE: Forzamos las columnas para evitar el error de 'EmptyDataError'
+    return pd.DataFrame(entidades, columns=['Nombre', 'Tipo', 'Enlace'])
 
-# --- Ejecución principal ---
-archivo_db = 'registro_entidades.csv'
-df_nuevo = obtener_datos()
-
-if not os.path.exists(archivo_db):
-    df_nuevo.to_csv(archivo_db, index=False)
-    enviar_telegram("✅ <b>Monitor CNMV Activado</b>\nEl sistema ya está vigilando los registros de SGIIC y SGEIC.")
-else:
-    df_antiguo = pd.read_csv(archivo_db)
-    # Comparamos para ver si hay nombres nuevos que no estaban en nuestra lista
-    novedades = df_nuevo[~df_nuevo['Nombre'].isin(df_antiguo['Nombre'])]
+# --- EJECUCIÓN ---
+try:
+    df_nuevo = obtener_datos()
     
-    if not novedades.empty:
-        for _, fila in novedades.iterrows():
-            mensaje = (
-                f"🔔 <b>¡NUEVA GESTORA DETECTADA!</b>\n\n"
-                f"🏢 <b>Nombre:</b> {fila['Nombre']}\n"
-                f"📂 <b>Tipo:</b> {fila['Tipo']}\n"
-                f"🔗 <a href='{fila['Enlace']}'>Ver ficha oficial en CNMV</a>"
-            )
-            enviar_telegram(mensaje)
-        # Guardamos la lista actualizada
-        df_nuevo.to_csv(archivo_db, index=False)
+    if not os.path.exists(ARCHIVO_DB):
+        df_nuevo.to_csv(ARCHIVO_DB, index=False)
+        enviar_telegram("🚀 <b>¡Monitor Activado!</b>\nHe guardado el primer registro correctamente.")
     else:
-        enviar_telegram("🚀 ¡Conexión exitosa! El monitor de la CNMV ya me envía mensajes.")
+        # Si el archivo existe pero está vacío, lo manejamos sin crash
+        try:
+            df_antiguo = pd.read_csv(ARCHIVO_DB)
+        except:
+            df_antiguo = pd.DataFrame(columns=['Nombre', 'Tipo', 'Enlace'])
+
+        novedades = df_nuevo[~df_nuevo['Nombre'].isin(df_antiguo['Nombre'])]
+        
+        if not novedades.empty:
+            for _, fila in novedades.iterrows():
+                enviar_telegram(f"🔔 <b>NUEVA GESTORA:</b>\n🏢 {fila['Nombre']}\n🔗 <a href='{fila['Enlace']}'>Ver ficha</a>")
+            df_nuevo.to_csv(ARCHIVO_DB, index=False)
+        else:
+            print("Sin novedades.")
+            enviar_telegram("🤖 <b>Monitor CNMV:</b> Sigo vigilando, hoy no hay cambios.")
+
+except Exception as e:
+    print(f"❌ ERROR CRITICAL: {e}")
+    sys.exit(1)
