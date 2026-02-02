@@ -1,0 +1,33 @@
+name: Monitor CNMV Diario
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # Se ejecuta todos los días a las 09:00 AM (hora UTC)
+  workflow_dispatch: # Permite ejecutarlo a mano cuando quieras
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v2
+
+      - name: Configurar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Instalar herramientas
+        run: |
+          pip install requests beautifulsoup4 pandas
+
+      - name: Ejecutar Scraper
+        run: python scraper.py
+
+      - name: Guardar cambios si hay novedades
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add registro_entidades.csv
+          git commit -m "Actualización de entidades" || exit 0
+          git push
