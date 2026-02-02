@@ -12,12 +12,15 @@ def enviar_telegram(mensaje):
     if TOKEN and CHAT_ID:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         payload = {
-            'chat_id': CHAT_ID, 
+            'chat_id': CHAT_ID,
             'text': mensaje,
-            'parse_mode': 'HTML' # Esto permite poner negritas y enlaces bonitos
+            'parse_mode': 'HTML'
         }
-        requests.post(url, data=payload)
-
+        # ESTO ES LO NUEVO: Guardamos la respuesta para ver qué dice
+        r = requests.post(url, data=payload)
+        print(f"Resultado de Telegram: {r.status_code} - {r.text}")
+    else:
+        print("❌ Error: No se encontraron el TOKEN o el CHAT_ID en los Secrets.")
 def obtener_datos():
     nuevas_entidades = []
     headers = {'User-Agent': 'Mozilla/5.0'}
