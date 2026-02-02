@@ -69,4 +69,4 @@ else:
         # Guardamos la lista actualizada
         df_nuevo.to_csv(archivo_db, index=False)
     else:
-        print("Sin novedades en el registro.")
+        enviar_telegram("🚀 ¡Conexión exitosa! El monitor de la CNMV ya me envía mensajes.")
